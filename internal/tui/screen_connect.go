@@ -66,10 +66,10 @@ func (m model) handleConnectionResult(msg connectionResultMsg) (tea.Model, tea.C
 	m.loadingWorkflows = true
 	m.workflowsError = ""
 	m.hostInput.Blur()
+	m.composerInput.Blur()
 	m.appendActivity(fmt.Sprintf("Connected to %s.", msg.host))
 
-	focusCmd := m.composerInput.Focus()
-	return m, tea.Batch(focusCmd, m.spinner.Tick, loadWorkflowsCmd(msg.host))
+	return m, tea.Batch(m.spinner.Tick, loadWorkflowsCmd(msg.host))
 }
 
 func (m model) handleConnectClick(x, y int) (model, tea.Cmd) {
