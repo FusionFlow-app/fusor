@@ -21,6 +21,10 @@ func (m *model) beginWorkflowEditor(name string) {
 	m.draggingNode = -1
 	m.connectSource = -1
 	m.paletteIndex = 0
+	m.editorOverlay = editorOverlayNone
+	m.editorMenuSelected = 0
+	m.editorMenuTarget = -1
+	m.editorCreateAtMenu = false
 	m.modalFocusedControl = 0
 	m.modalDraft = nil
 	m.editorNodes = []editorNode{
@@ -55,8 +59,11 @@ func (m model) updateWorkflowEditor(msg tea.Msg) (model, tea.Cmd) {
 		return m.updateWorkflowEditorKey(msg), nil
 	case tea.MouseClickMsg:
 		mouse := msg.Mouse()
-		if mouse.Button == tea.MouseLeft {
+		switch mouse.Button {
+		case tea.MouseLeft:
 			m.handleWorkflowEditorClick(mouse.X, mouse.Y)
+		case tea.MouseRight:
+			m.openWorkflowContextMenu(mouse.X, mouse.Y)
 		}
 	case tea.MouseMotionMsg:
 		m.handleWorkflowEditorMotion(msg.Mouse())
@@ -72,6 +79,9 @@ func (m model) updateWorkflowEditorKey(msg tea.KeyPressMsg) model {
 	if m.editorMode == editorModeModal {
 		return m.updateNodeModalKey(msg)
 	}
+	if m.editorOverlay != editorOverlayNone {
+		return m.updateEditorOverlayKey(msg)
+	}
 
 	switch msg.String() {
 	case "esc":
@@ -81,6 +91,9 @@ func (m model) updateWorkflowEditorKey(msg tea.KeyPressMsg) model {
 			return m
 		}
 		m.screen = screenApp
+		return m
+	case "ctrl+p", "ctrl+shift+p":
+		m.openWorkflowCommandPalette()
 		return m
 	case "tab":
 		m.selectNextNode(1)
@@ -131,11 +144,14 @@ func (m model) renderWorkflowEditor() string {
 	palette := renderSectionPanel("Palette", m.renderPaletteLines(), m.paletteRect.w, m.paletteRect.h)
 	inspector := renderSectionPanel("Inspector", m.renderInspectorLines(), m.inspectorRect.w, m.inspectorRect.h)
 	bottom := lipgloss.JoinHorizontal(lipgloss.Top, palette, blank(sectionGapSize), inspector)
-	footer := renderFooter("drag move  click select  arrows move  enter edit  a add  c connect  esc back", m.footerRect.w)
+	footer := renderFooter("drag move  right click menu  ctrl+shift+p palette  arrows move  enter edit  esc back", m.footerRect.w)
 	ui := lipgloss.JoinVertical(lipgloss.Left, canvas, blank(m.width), bottom, footer)
 
 	if m.editorMode == editorModeModal {
 		return m.renderNodeModal()
+	}
+	if m.editorOverlay == editorOverlayCommand || m.editorOverlay == editorOverlayCreate {
+		return m.renderWorkflowCommandPalette()
 	}
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, ui)
@@ -151,6 +167,9 @@ func (m model) renderCanvasLines() []string {
 	}
 	for i, node := range m.editorNodes {
 		drawEditorNode(grid, node, i == m.selectedNode)
+	}
+	if m.editorOverlay == editorOverlayContext {
+		m.drawContextMenu(grid)
 	}
 
 	lines := make([]string, len(grid))
@@ -226,7 +245,41 @@ func (m model) renderNodeModal() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
 }
 
+func (m model) renderWorkflowCommandPalette() string {
+	items := m.editorMenuItems()
+	title := "Command Palette"
+	subtitle := "Workflow actions"
+	if m.editorOverlay == editorOverlayCreate {
+		title = "Create Node"
+		subtitle = "Choose a node type"
+	}
+	lines := []string{
+		lipgloss.NewStyle().Foreground(mutedTextColor).Render(subtitle),
+		"",
+	}
+	for i, item := range items {
+		prefix := "  "
+		style := lipgloss.NewStyle().Foreground(textColor)
+		if i == m.editorMenuSelected {
+			prefix = "› "
+			style = style.Foreground(accentColor).Bold(true)
+		}
+		lines = append(lines, style.Render(prefix+item.label))
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(mutedTextColor).Render("↑↓ select  enter run  esc close"))
+
+	width := min(46, max(m.width-8, 28))
+	height := min(max(len(lines)+3, 10), max(m.height-4, 8))
+	palette := renderSectionPanel(title, lines, width, height)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, palette)
+}
+
 func (m *model) handleWorkflowEditorClick(x, y int) {
+	if m.editorOverlay != editorOverlayNone {
+		m.handleEditorOverlayClick(x, y)
+		return
+	}
+
 	if m.editorMode == editorModeModal {
 		if !inside(x, y, m.modalRect) {
 			return
@@ -280,6 +333,194 @@ func (m *model) handleWorkflowEditorClick(x, y int) {
 	}
 }
 
+func (m *model) openWorkflowContextMenu(x, y int) {
+	if m.editorMode == editorModeModal {
+		return
+	}
+	m.draggingNode = -1
+	m.editorOverlay = editorOverlayContext
+	m.editorMenuSelected = 0
+	m.editorMenuTarget = -1
+	m.editorCreateAtMenu = true
+
+	for i, node := range m.editorNodes {
+		if inside(x, y, m.nodeRects[node.id]) {
+			m.selectedNode = i
+			m.editorMenuTarget = i
+			break
+		}
+	}
+	if m.editorMenuTarget < 0 && !inside(x, y, m.canvasRect) {
+		m.closeEditorOverlay()
+		return
+	}
+
+	contentX := x - m.canvasRect.x - 2
+	contentY := y - m.canvasRect.y - 2
+	menuWidth, menuHeight := m.contextMenuSize()
+	m.editorMenuX = clamp(contentX, 0, max(m.canvasRect.w-4-menuWidth, 0))
+	m.editorMenuY = clamp(contentY, 0, max(m.canvasRect.h-3-menuHeight, 0))
+}
+
+func (m *model) openWorkflowCommandPalette() {
+	m.draggingNode = -1
+	m.editorOverlay = editorOverlayCommand
+	m.editorMenuSelected = 0
+	m.editorMenuTarget = m.selectedNode
+	m.editorCreateAtMenu = false
+}
+
+func (m model) updateEditorOverlayKey(msg tea.KeyPressMsg) model {
+	items := m.editorMenuItems()
+	switch msg.String() {
+	case "esc":
+		m.closeEditorOverlay()
+	case "up":
+		m.editorMenuSelected = clamp(m.editorMenuSelected-1, 0, len(items)-1)
+	case "down":
+		m.editorMenuSelected = clamp(m.editorMenuSelected+1, 0, len(items)-1)
+	case "enter":
+		if len(items) > 0 {
+			m.runEditorAction(items[m.editorMenuSelected])
+		}
+	}
+	return m
+}
+
+func (m *model) handleEditorOverlayClick(x, y int) {
+	menuRect := m.editorMenuRect()
+	if !inside(x, y, menuRect) {
+		m.closeEditorOverlay()
+		return
+	}
+
+	row := y - menuRect.y - 1
+	if m.editorOverlay == editorOverlayCommand || m.editorOverlay == editorOverlayCreate {
+		row = y - menuRect.y - 4
+	}
+	items := m.editorMenuItems()
+	if row < 0 || row >= len(items) {
+		return
+	}
+	m.editorMenuSelected = row
+	m.runEditorAction(items[row])
+}
+
+func (m *model) closeEditorOverlay() {
+	m.editorOverlay = editorOverlayNone
+	m.editorMenuSelected = 0
+	m.editorMenuTarget = -1
+	m.editorCreateAtMenu = false
+}
+
+func (m model) editorMenuItems() []editorMenuItem {
+	if m.editorOverlay == editorOverlayCreate {
+		return editorCreateMenuItems()
+	}
+
+	if m.editorOverlay == editorOverlayContext {
+		if m.editorMenuTarget >= 0 && m.editorMenuTarget < len(m.editorNodes) {
+			items := []editorMenuItem{
+				{label: "Edit node", action: editorActionEdit},
+			}
+			if m.editorNodes[m.editorMenuTarget].kind != "Start" {
+				items = append(items, editorMenuItem{label: "Delete node", action: editorActionDelete})
+			}
+			return items
+		}
+		return []editorMenuItem{
+			{label: "Create node", action: editorActionOpenCreate},
+		}
+	}
+
+	items := []editorMenuItem{
+		{label: "Create node", action: editorActionOpenCreate},
+	}
+	if m.hasSelectedEditorNode() {
+		items = append(items,
+			editorMenuItem{label: "Edit selected node", action: editorActionEdit},
+			editorMenuItem{label: "Connect from selected node", action: editorActionConnect},
+		)
+		if m.editorNodes[m.selectedNode].kind != "Start" {
+			items = append(items, editorMenuItem{label: "Delete selected node", action: editorActionDelete})
+		}
+	}
+	return append(items, editorMenuItem{label: "Back to workflows", action: editorActionBack})
+}
+
+func (m model) editorMenuRect() rect {
+	if m.editorOverlay == editorOverlayCommand || m.editorOverlay == editorOverlayCreate {
+		items := m.editorMenuItems()
+		width := min(46, max(m.width-8, 28))
+		height := min(max(len(items)+7, 10), max(m.height-4, 8))
+		return rect{x: max((m.width-width)/2, 0), y: max((m.height-height)/2, 0), w: width, h: height}
+	}
+
+	width, height := m.contextMenuSize()
+	return rect{
+		x: m.canvasRect.x + 2 + m.editorMenuX,
+		y: m.canvasRect.y + 2 + m.editorMenuY,
+		w: width,
+		h: height,
+	}
+}
+
+func (m model) contextMenuSize() (int, int) {
+	width := 0
+	for _, item := range m.editorMenuItems() {
+		width = max(width, len(item.label)+6)
+	}
+	return max(width, 16), len(m.editorMenuItems()) + 2
+}
+
+func editorCreateMenuItems() []editorMenuItem {
+	items := make([]editorMenuItem, 0, len(editorPalette))
+	for _, kind := range editorPalette {
+		items = append(items, editorMenuItem{
+			label:  "Add " + kind,
+			action: editorActionCreate,
+			kind:   kind,
+		})
+	}
+	return items
+}
+
+func (m *model) runEditorAction(item editorMenuItem) {
+	target := m.editorMenuTarget
+	if target >= 0 && target < len(m.editorNodes) {
+		m.selectedNode = target
+	}
+
+	switch item.action {
+	case editorActionOpenCreate:
+		m.editorOverlay = editorOverlayCreate
+		m.editorMenuSelected = 0
+	case editorActionCreate:
+		kind := fallbackString(item.kind, "Evaluate Code")
+		if m.editorCreateAtMenu {
+			m.addEditorNodeAt(kind, m.editorMenuX, m.editorMenuY)
+		} else {
+			m.addEditorNode(kind)
+		}
+		m.closeEditorOverlay()
+	case editorActionDelete:
+		m.closeEditorOverlay()
+		m.deleteSelectedEditorNode()
+	case editorActionEdit:
+		m.closeEditorOverlay()
+		m.openNodeModal()
+	case editorActionConnect:
+		m.closeEditorOverlay()
+		if m.hasSelectedEditorNode() {
+			m.editorMode = editorModeConnect
+			m.connectSource = m.selectedNode
+		}
+	case editorActionBack:
+		m.closeEditorOverlay()
+		m.screen = screenApp
+	}
+}
+
 func (m *model) handleWorkflowEditorMotion(mouse tea.Mouse) {
 	if m.draggingNode < 0 || m.draggingNode >= len(m.editorNodes) {
 		return
@@ -305,17 +546,21 @@ func (m *model) moveSelectedEditorNode(dx, dy int) {
 }
 
 func (m *model) addEditorNode(kind string) {
+	m.addEditorNodeAt(kind, max((m.canvasRect.w-4)/2-8, 0), max((m.canvasRect.h-3)/2-1, 0))
+}
+
+func (m *model) addEditorNodeAt(kind string, x, y int) {
 	id := fmt.Sprintf("node_%d", len(m.editorNodes)+1)
 	node := editorNode{
 		id:       id,
 		kind:     kind,
 		label:    kind,
-		x:        max((m.canvasRect.w-4)/2-8, 0),
-		y:        max((m.canvasRect.h-3)/2-1, 0),
 		w:        16,
 		h:        3,
 		controls: defaultControls(kind),
 	}
+	node.x = clamp(x, 0, max(m.canvasRect.w-4-node.w, 0))
+	node.y = clamp(y, 0, max(m.canvasRect.h-3-node.h, 0))
 	m.editorNodes = append(m.editorNodes, node)
 	m.selectedNode = len(m.editorNodes) - 1
 	m.rebuildNodeRects()
@@ -486,6 +731,39 @@ func drawEditorNode(grid [][]rune, node editorNode, selected bool) {
 	drawText(grid, node.x+2, node.y+1, truncatePlain(label, node.w-4))
 }
 
+func (m model) drawContextMenu(grid [][]rune) {
+	items := m.editorMenuItems()
+	if len(items) == 0 {
+		return
+	}
+	width, height := m.contextMenuSize()
+	x := m.editorMenuX
+	y := m.editorMenuY
+
+	drawRune(grid, x, y, '╭')
+	drawRune(grid, x+width-1, y, '╮')
+	drawRune(grid, x, y+height-1, '╰')
+	drawRune(grid, x+width-1, y+height-1, '╯')
+	for col := x + 1; col < x+width-1; col++ {
+		drawRune(grid, col, y, '─')
+		drawRune(grid, col, y+height-1, '─')
+	}
+	for row := y + 1; row < y+height-1; row++ {
+		drawRune(grid, x, row, '│')
+		drawRune(grid, x+width-1, row, '│')
+		for col := x + 1; col < x+width-1; col++ {
+			drawRune(grid, col, row, ' ')
+		}
+	}
+	for i, item := range items {
+		prefix := "  "
+		if i == m.editorMenuSelected {
+			prefix = "› "
+		}
+		drawText(grid, x+2, y+1+i, truncatePlain(prefix+item.label, max(width-4, 1)))
+	}
+}
+
 func (m model) drawConnection(grid [][]rune, conn editorConnection) {
 	source, okSource := m.editorNodeByID(conn.source)
 	target, okTarget := m.editorNodeByID(conn.target)
@@ -496,15 +774,22 @@ func (m model) drawConnection(grid [][]rune, conn editorConnection) {
 	y1 := source.y + source.h/2
 	x2 := target.x - 1
 	y2 := target.y + target.h/2
+	arrow := '▶'
 	if x1 > x2 {
 		x1 = source.x + source.w/2
 		y1 = source.y + source.h
 		x2 = target.x + target.w/2
 		y2 = target.y - 1
+		arrow = '▼'
+		if target.y < source.y {
+			y1 = source.y - 1
+			y2 = target.y + target.h
+			arrow = '▲'
+		}
 	}
 	if y1 == y2 {
 		drawHorizontalLine(grid, x1, x2, y1)
-		drawRune(grid, x2, y2, '▶')
+		drawRune(grid, x2, y2, arrow)
 		return
 	}
 	midX := (x1 + x2) / 2
@@ -513,7 +798,7 @@ func (m model) drawConnection(grid [][]rune, conn editorConnection) {
 	drawHorizontalLine(grid, midX, x2, y2)
 	drawRune(grid, midX, y1, connectionCorner(horizontalDirection(x1, midX), verticalDirection(y1, y2)))
 	drawRune(grid, midX, y2, connectionCorner(-horizontalDirection(midX, x2), -verticalDirection(y1, y2)))
-	drawRune(grid, x2, y2, '▶')
+	drawRune(grid, x2, y2, arrow)
 }
 
 func drawHorizontalLine(grid [][]rune, x1, x2, y int) {

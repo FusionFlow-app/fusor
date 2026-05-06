@@ -55,6 +55,32 @@ const (
 	editorModeModal   editorMode = "modal"
 )
 
+type editorOverlay string
+
+const (
+	editorOverlayNone    editorOverlay = ""
+	editorOverlayContext editorOverlay = "context"
+	editorOverlayCommand editorOverlay = "command"
+	editorOverlayCreate  editorOverlay = "create"
+)
+
+type editorAction string
+
+const (
+	editorActionOpenCreate editorAction = "open_create"
+	editorActionCreate     editorAction = "create"
+	editorActionDelete     editorAction = "delete"
+	editorActionEdit       editorAction = "edit"
+	editorActionConnect    editorAction = "connect"
+	editorActionBack       editorAction = "back"
+)
+
+type editorMenuItem struct {
+	label  string
+	action editorAction
+	kind   string
+}
+
 type editorNode struct {
 	id       string
 	kind     string
@@ -123,6 +149,12 @@ type model struct {
 	connectSource       int
 	paletteIndex        int
 	editorMode          editorMode
+	editorOverlay       editorOverlay
+	editorMenuX         int
+	editorMenuY         int
+	editorMenuSelected  int
+	editorMenuTarget    int
+	editorCreateAtMenu  bool
 	modalFocusedControl int
 	modalDraft          []nodeControl
 	nodeRects           map[string]rect
@@ -167,17 +199,18 @@ func initialModel() model {
 	sp.Style = lipgloss.NewStyle().Foreground(accentColor)
 
 	return model{
-		screen:          screenConnect,
-		hostInput:       hostInput,
-		composerInput:   composerInput,
-		spinner:         sp,
-		connectStatus:   "Enter server host to continue.",
-		terminalFocused: true,
-		selectedNode:    -1,
-		draggingNode:    -1,
-		connectSource:   -1,
-		editorMode:      editorModeNormal,
-		nodeRects:       map[string]rect{},
+		screen:           screenConnect,
+		hostInput:        hostInput,
+		composerInput:    composerInput,
+		spinner:          sp,
+		connectStatus:    "Enter server host to continue.",
+		terminalFocused:  true,
+		selectedNode:     -1,
+		draggingNode:     -1,
+		connectSource:    -1,
+		editorMenuTarget: -1,
+		editorMode:       editorModeNormal,
+		nodeRects:        map[string]rect{},
 	}
 }
 
