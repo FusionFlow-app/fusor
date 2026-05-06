@@ -1,0 +1,25 @@
+# Build outputs
+/fusor
+/bin/
+/dist/
+/build/
+
+# Go test/build artifacts
+*.test
+*.out
+coverage.out
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
