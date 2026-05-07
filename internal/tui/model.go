@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/zalando/go-keyring"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 	panelPaddingTop     = 1
 	panelPaddingBottom  = 1
 	connectCardWidth    = 56
-	connectCardHeight   = 11
+	connectCardHeight   = 19
 	connectInputWidth   = 34
 	connectButtonWidth  = 14
 	defaultWorkflowName = "Untitled workflow"
@@ -104,20 +105,34 @@ type editorConnection struct {
 }
 
 type connectionResultMsg struct {
-	host string
-	err  error
+	host   string
+	apiKey string
+	err    error
 }
 
 type workflowsLoadedMsg struct {
 	workflows []workflow
+	nodes     []apiNodeDef
 	err       error
+}
+
+type workflowLoadedMsg struct {
+	flow apiFlow
+	err  error
+}
+
+type workflowSavedMsg struct {
+	flow apiFlow
+	err  error
 }
 
 type model struct {
 	screen screen
 
 	hostInput     textinput.Model
+	apiKeyInput   textinput.Model
 	composerInput textinput.Model
+	aiPromptInput textinput.Model
 	spinner       spinner.Model
 
 	width  int
@@ -129,19 +144,25 @@ type model struct {
 	terminalFocused  bool
 
 	activeHost     string
+	activeAPIKey   string
 	connectStatus  string
 	connectError   string
 	workflowsError string
 
 	workflows        []workflow
+	availableNodes   []apiNodeDef
 	selectedWorkflow int
 	workflowScroll   int
 	activities       []string
 	commandOutput    []string
 
+	editorWorkflowID    int
 	editorWorkflowName  string
 	editorNodes         []editorNode
 	editorConnections   []editorConnection
+	editorDirty         bool
+	editorSaving        bool
+	editorStatusMessage string
 	selectedNode        int
 	draggingNode        int
 	dragOffsetX         int
@@ -155,24 +176,29 @@ type model struct {
 	editorMenuSelected  int
 	editorMenuTarget    int
 	editorCreateAtMenu  bool
+	aiChatMessages      []string
+	aiChatScroll        int
 	modalFocusedControl int
 	modalDraft          []nodeControl
 	nodeRects           map[string]rect
 
-	connectCardRect   rect
-	connectInputRect  rect
-	connectButtonRect rect
-	sidebarRect       rect
-	navRect           rect
-	workflowListRect  rect
-	mainRect          rect
-	commandRect       rect
-	commandInputRect  rect
-	canvasRect        rect
-	paletteRect       rect
-	inspectorRect     rect
-	modalRect         rect
-	footerRect        rect
+	connectCardRect    rect
+	connectInputRect   rect
+	connectButtonRect  rect
+	sidebarRect        rect
+	navRect            rect
+	workflowListRect   rect
+	mainRect           rect
+	commandRect        rect
+	commandInputRect   rect
+	canvasRect         rect
+	aiChatRect         rect
+	aiChatMessagesRect rect
+	aiPromptInputRect  rect
+	paletteRect        rect
+	inspectorRect      rect
+	modalRect          rect
+	footerRect         rect
 }
 
 func initialModel() model {
@@ -180,11 +206,29 @@ func initialModel() model {
 	hostInput.SetValue(defaultServer)
 	hostInput.SetWidth(0)
 	hostInput.CharLimit = len(defaultServer) + 64
-	hostInput.Placeholder = defaultServer
-	hostInput.Prompt = ""
+	hostInput.Placeholder = "localhost:4000"
+	hostInput.Prompt = "Host: "
 	hostInput.SetVirtualCursor(true)
 	hostInput.SetStyles(textInputStyles())
 	hostInput.Focus()
+
+	if savedHost, err := keyring.Get("fusor", "host"); err == nil && savedHost != "" {
+		hostInput.SetValue(savedHost)
+	}
+
+	apiKeyInput := textinput.New()
+	apiKeyInput.SetWidth(0)
+	apiKeyInput.CharLimit = 128
+	apiKeyInput.Placeholder = "ff_live_..."
+	apiKeyInput.Prompt = "Key:  "
+	apiKeyInput.SetVirtualCursor(true)
+	apiKeyInput.SetStyles(textInputStyles())
+	apiKeyInput.EchoMode = textinput.EchoPassword
+	apiKeyInput.EchoCharacter = '•'
+
+	if savedKey, err := keyring.Get("fusor", "api_key"); err == nil && savedKey != "" {
+		apiKeyInput.SetValue(savedKey)
+	}
 
 	composerInput := textinput.New()
 	composerInput.SetWidth(0)
@@ -194,16 +238,34 @@ func initialModel() model {
 	composerInput.SetVirtualCursor(true)
 	composerInput.SetStyles(textInputStyles())
 
+	aiPromptInput := textinput.New()
+	aiPromptInput.SetWidth(0)
+	aiPromptInput.CharLimit = 512
+	aiPromptInput.Placeholder = "Describe the workflow to build..."
+	aiPromptInput.Prompt = ""
+	aiPromptInput.SetVirtualCursor(true)
+	aiPromptInput.SetStyles(textInputStyles())
+
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(accentColor)
 
 	return model{
-		screen:           screenConnect,
-		hostInput:        hostInput,
-		composerInput:    composerInput,
-		spinner:          sp,
-		connectStatus:    "Enter server host to continue.",
+		screen:        screenConnect,
+		hostInput:     hostInput,
+		apiKeyInput:   apiKeyInput,
+		composerInput: composerInput,
+		aiPromptInput: aiPromptInput,
+		spinner:       sp,
+		connectStatus: "Enter server host to continue.",
+		aiChatMessages: []string{
+			"Agent: Olá! Descreva o workflow que deseja construir.",
+			"You: Quero um workflow que processa CSV e salva no banco",
+			"Agent: Entendido! Vou criar: Start → Evaluate Code → Variable → Output",
+			"Agent: Adicionei um nó de leitura de CSV. Configure o caminho do arquivo no inspector.",
+			"You: Adiciona também validação de dados",
+			"Agent: Nó de validação adicionado entre o CSV e o banco. Use o inspector para definir as regras.",
+		},
 		terminalFocused:  true,
 		selectedNode:     -1,
 		draggingNode:     -1,

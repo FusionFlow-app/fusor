@@ -17,6 +17,20 @@ type flowsResponse struct {
 	Data []apiFlow `json:"data"`
 }
 
+type workflowResponse struct {
+	Data apiFlow `json:"data"`
+}
+
+type workflowRequest struct {
+	Workflow workflowPayload `json:"workflow"`
+}
+
+type workflowPayload struct {
+	Name        string              `json:"name"`
+	Nodes       []apiNode           `json:"nodes"`
+	Connections []apiSaveConnection `json:"connections"`
+}
+
 type apiFlow struct {
 	ID          int             `json:"id"`
 	Name        string          `json:"name"`
@@ -27,12 +41,41 @@ type apiFlow struct {
 }
 
 type apiNode struct {
+	ID       any            `json:"id"`
+	Type     string         `json:"type"`
+	Label    string         `json:"label"`
+	Position apiPosition    `json:"position"`
 	Controls map[string]any `json:"controls"`
 }
 
+type apiPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
 type apiConnection struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Source any `json:"source"`
+	Target any `json:"target"`
+}
+
+type apiSaveConnection struct {
+	Source       any    `json:"source"`
+	SourceOutput string `json:"sourceOutput"`
+	Target       any    `json:"target"`
+	TargetInput  string `json:"targetInput"`
+}
+
+type nodesResponse struct {
+	Data []apiNodeDef `json:"data"`
+}
+
+type apiNodeDef struct {
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	Color       string `json:"color"`
+	Icon        string `json:"icon"`
 }
 
 func (m model) startConnection() (model, tea.Cmd) {
@@ -42,47 +85,69 @@ func (m model) startConnection() (model, tea.Cmd) {
 		m.hostInput.SetValue(server)
 	}
 
+	apiKey := strings.TrimSpace(m.apiKeyInput.Value())
+
 	m.connecting = true
 	m.connected = false
 	m.connectError = ""
 	m.connectStatus = "Connecting..."
 	m.hostInput.Blur()
+	m.apiKeyInput.Blur()
 
-	return m, tea.Batch(m.spinner.Tick, connectCmd(server))
+	return m, tea.Batch(m.spinner.Tick, connectCmd(server, apiKey))
 }
 
-func connectCmd(server string) tea.Cmd {
+func connectCmd(server, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
 
-		address, err := normalizeAddress(server)
+		baseURL, err := normalizeBaseURL(server)
 		if err != nil {
 			return connectionResultMsg{err: err}
 		}
 
-		if err := tryConnect(ctx, address); err != nil {
+		if err := tryConnect(ctx, baseURL); err != nil {
 			return connectionResultMsg{err: err}
 		}
 
-		return connectionResultMsg{host: address}
+		return connectionResultMsg{host: baseURL, apiKey: apiKey}
 	}
 }
 
-func loadWorkflowsCmd(host string) tea.Cmd {
+func loadWorkflowsCmd(host, apiKey string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
 
-		workflows, err := loadWorkflows(ctx, host)
+		workflows, err := loadWorkflows(ctx, host, apiKey)
+		if err != nil {
+			return workflowsLoadedMsg{err: err}
+		}
+
+		nodes, err := loadNodes(ctx, host, apiKey)
+
 		return workflowsLoadedMsg{
 			workflows: workflows,
+			nodes:     nodes,
 			err:       err,
 		}
 	}
 }
 
-func tryConnect(ctx context.Context, address string) error {
+func tryConnect(ctx context.Context, baseURL string) error {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return err
+	}
+	address := u.Host
+	if !strings.Contains(address, ":") {
+		if u.Scheme == "https" {
+			address += ":443"
+		} else {
+			address += ":80"
+		}
+	}
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", address)
 	if err != nil {
@@ -92,38 +157,33 @@ func tryConnect(ctx context.Context, address string) error {
 	return conn.Close()
 }
 
-func normalizeAddress(server string) (string, error) {
+func normalizeBaseURL(server string) (string, error) {
 	server = strings.TrimSpace(server)
 	if server == "" {
 		return "", fmt.Errorf("empty server")
 	}
 
-	if strings.Contains(server, "://") {
-		u, err := url.Parse(server)
-		if err != nil {
-			return "", fmt.Errorf("invalid server: %w", err)
-		}
-		if u.Host == "" {
-			return "", fmt.Errorf("invalid server: missing host")
-		}
-		return u.Host, nil
+	if !strings.HasPrefix(server, "http://") && !strings.HasPrefix(server, "https://") {
+		server = "http://" + server
 	}
 
-	if _, _, err := net.SplitHostPort(server); err == nil {
-		return server, nil
+	u, err := url.Parse(server)
+	if err != nil {
+		return "", fmt.Errorf("invalid server: %w", err)
 	}
 
-	if strings.Contains(server, ":") {
-		return server, nil
-	}
+	base := strings.TrimRight(u.String(), "/")
 
-	return net.JoinHostPort(server, "4000"), nil
+	return base, nil
 }
 
-func loadWorkflows(ctx context.Context, host string) ([]workflow, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/api/flows/", nil)
+func loadWorkflows(ctx context.Context, baseURL, apiKey string) ([]workflow, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/workflows", nil)
 	if err != nil {
 		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	client := &http.Client{Timeout: connectTimeout}
@@ -134,7 +194,7 @@ func loadWorkflows(ctx context.Context, host string) ([]workflow, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("flows api returned %s", resp.Status)
+		return nil, fmt.Errorf("workflows api returned %s", resp.Status)
 	}
 
 	var payload flowsResponse
@@ -147,6 +207,128 @@ func loadWorkflows(ctx context.Context, host string) ([]workflow, error) {
 		workflows = append(workflows, mapFlow(item))
 	}
 	return workflows, nil
+}
+
+func loadNodes(ctx context.Context, baseURL, apiKey string) ([]apiNodeDef, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/nodes", nil)
+	if err != nil {
+		return nil, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := &http.Client{Timeout: connectTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("nodes api returned %s", resp.Status)
+	}
+
+	var payload nodesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	nodes := payload.Data
+	// Group them properly, ignoring case for categories
+	for i := 0; i < len(nodes); i++ {
+		for j := i + 1; j < len(nodes); j++ {
+			catI := strings.ToUpper(nodes[i].Category)
+			catJ := strings.ToUpper(nodes[j].Category)
+			if catI > catJ || (catI == catJ && nodes[i].Title > nodes[j].Title) {
+				nodes[i], nodes[j] = nodes[j], nodes[i]
+			}
+		}
+	}
+
+	return nodes, nil
+}
+
+func loadWorkflowCmd(host, apiKey string, workflowID int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+		defer cancel()
+
+		flow, err := loadWorkflow(ctx, host, apiKey, workflowID)
+		return workflowLoadedMsg{flow: flow, err: err}
+	}
+}
+
+func loadWorkflow(ctx context.Context, baseURL, apiKey string, workflowID int) (apiFlow, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/workflows/%d", baseURL, workflowID), nil)
+	if err != nil {
+		return apiFlow{}, err
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := &http.Client{Timeout: connectTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return apiFlow{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return apiFlow{}, fmt.Errorf("workflow api returned %s", resp.Status)
+	}
+
+	var payload workflowResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return apiFlow{}, err
+	}
+
+	return payload.Data, nil
+}
+
+func saveWorkflowCmd(host, apiKey string, workflowID int, req workflowRequest) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+		defer cancel()
+
+		flow, err := saveWorkflow(ctx, host, apiKey, workflowID, req)
+		return workflowSavedMsg{flow: flow, err: err}
+	}
+}
+
+func saveWorkflow(ctx context.Context, baseURL, apiKey string, workflowID int, req workflowRequest) (apiFlow, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return apiFlow{}, err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPatch, fmt.Sprintf("%s/api/v1/workflows/%d", baseURL, workflowID), strings.NewReader(string(body)))
+	if err != nil {
+		return apiFlow{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := &http.Client{Timeout: connectTimeout}
+	resp, err := client.Do(request)
+	if err != nil {
+		return apiFlow{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return apiFlow{}, fmt.Errorf("save workflow api returned %s", resp.Status)
+	}
+
+	var payload workflowResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return apiFlow{}, err
+	}
+
+	return payload.Data, nil
 }
 
 func mapFlow(item apiFlow) workflow {

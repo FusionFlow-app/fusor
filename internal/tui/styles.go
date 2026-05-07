@@ -10,7 +10,7 @@ import (
 
 var (
 	backgroundColor = lipgloss.Color("#222222")
-	inputBackground = lipgloss.Color("#1F1F1F")
+	inputBackground = lipgloss.Color("#333333")
 	panelBorder     = lipgloss.Color("#4B5563")
 	shadowColor     = lipgloss.Color("#222222")
 	shadowEdgeColor = lipgloss.Color("#222222")
@@ -23,17 +23,26 @@ var (
 
 func textInputStyles() textinput.Styles {
 	styles := textinput.DefaultDarkStyles()
-	base := lipgloss.NewStyle().Foreground(textColor)
-	muted := lipgloss.NewStyle().Foreground(mutedTextColor)
+	base := lipgloss.NewStyle().
+		Foreground(textColor).
+		Background(inputBackground)
+	muted := lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		Background(inputBackground)
 
 	styles.Focused.Text = base
 	styles.Focused.Prompt = base
 	styles.Focused.Placeholder = muted
 	styles.Focused.Suggestion = muted
-	styles.Blurred.Text = base.Foreground(mutedTextColor)
-	styles.Blurred.Prompt = muted
-	styles.Blurred.Placeholder = muted
-	styles.Blurred.Suggestion = muted
+	
+	blurredBase := lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		Background(inputBackground)
+
+	styles.Blurred.Text = blurredBase
+	styles.Blurred.Prompt = blurredBase
+	styles.Blurred.Placeholder = blurredBase
+	styles.Blurred.Suggestion = blurredBase
 	styles.Cursor.Color = accentColor
 	styles.Cursor.Blink = true
 
@@ -131,18 +140,37 @@ func renderShadowRow(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func inputShell(width int, focused bool) lipgloss.Style {
-	style := lipgloss.NewStyle().
-		Width(max(width-2, 1)).
-		Padding(0, 1).
-		Background(inputBackground).
-		Foreground(textColor)
-
+func renderInputBlock(val string, width int, focused bool) string {
+	borderColor := panelBorder
 	if focused {
-		style = style.Foreground(textColor)
+		borderColor = accentColor
+	}
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+	bgStyle := lipgloss.NewStyle().Background(inputBackground)
+
+	b := lipgloss.RoundedBorder()
+	innerWidth := width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
 	}
 
-	return style
+	top := borderStyle.Render(b.TopLeft + strings.Repeat(b.Top, innerWidth) + b.TopRight)
+	bottom := borderStyle.Render(b.BottomLeft + strings.Repeat(b.Bottom, innerWidth) + b.BottomRight)
+
+	leftPad := bgStyle.Render(" ")
+	availWidth := innerWidth - 1
+	if availWidth < 0 {
+		availWidth = 0
+	}
+
+	paddedVal := lipgloss.NewStyle().Background(inputBackground).Width(availWidth).Render(val)
+
+	midLeft := borderStyle.Render(b.Left) + leftPad
+	midRight := borderStyle.Render(b.Right)
+
+	middle := midLeft + paddedVal + midRight
+
+	return top + "\n" + middle + "\n" + bottom
 }
 
 func panelLine(width int, content string, align lipgloss.Position) string {

@@ -2,16 +2,28 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/zalando/go-keyring"
 )
 
 func (m model) updateConnect(msg tea.Msg) (model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if msg.String() == "enter" && !m.connecting {
+		if msg.Code == tea.KeyEnter && !m.connecting {
 			return m.startConnection()
+		}
+		if msg.String() == "tab" || msg.String() == "shift+tab" || msg.String() == "up" || msg.String() == "down" {
+			if m.hostInput.Focused() {
+				m.hostInput.Blur()
+				m.apiKeyInput.Focus()
+			} else {
+				m.apiKeyInput.Blur()
+				m.hostInput.Focus()
+			}
+			return m, nil
 		}
 	case tea.MouseClickMsg:
 		mouse := msg.Mouse()
@@ -20,9 +32,10 @@ func (m model) updateConnect(msg tea.Msg) (model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.hostInput, cmd = m.hostInput.Update(msg)
-	return m, cmd
+	var cmd1, cmd2 tea.Cmd
+	m.hostInput, cmd1 = m.hostInput.Update(msg)
+	m.apiKeyInput, cmd2 = m.apiKeyInput.Update(msg)
+	return m, tea.Batch(cmd1, cmd2)
 }
 
 func (m model) View() tea.View {
@@ -60,16 +73,22 @@ func (m model) handleConnectionResult(msg connectionResultMsg) (tea.Model, tea.C
 
 	m.connected = true
 	m.activeHost = msg.host
+	m.activeAPIKey = msg.apiKey
+
+	_ = keyring.Set("fusor", "host", msg.host)
+	_ = keyring.Set("fusor", "api_key", msg.apiKey)
+
 	m.connectError = ""
 	m.connectStatus = "Connected."
 	m.screen = screenApp
 	m.loadingWorkflows = true
 	m.workflowsError = ""
 	m.hostInput.Blur()
+	m.apiKeyInput.Blur()
 	m.composerInput.Blur()
 	m.appendActivity(fmt.Sprintf("Connected to %s.", msg.host))
 
-	return m, tea.Batch(m.spinner.Tick, loadWorkflowsCmd(msg.host))
+	return m, tea.Batch(m.spinner.Tick, loadWorkflowsCmd(msg.host, msg.apiKey))
 }
 
 func (m model) handleConnectClick(x, y int) (model, tea.Cmd) {
@@ -101,8 +120,8 @@ func (m model) renderConnectScreen() string {
 		Foreground(mutedTextColor).
 		Render("Connect to your FusionFlow server")
 
-	inputView := padRightBlank(m.hostInput.View(), max(formWidth-2, 1))
-	inputLine := inputShell(formWidth, m.hostInput.Focused()).Render(inputView)
+	inputLine := renderInputBlock(m.hostInput.View(), formWidth, m.hostInput.Focused())
+	apiKeyLine := renderInputBlock(m.apiKeyInput.View(), formWidth, m.apiKeyInput.Focused())
 
 	buttonLabel := "Connect"
 	if m.connecting {
@@ -130,17 +149,34 @@ func (m model) renderConnectScreen() string {
 		"",
 		centeredLine(subtitle, innerWidth),
 		"",
-		centeredLine(inputLine, innerWidth),
-		"",
+	}
+
+	leftPadding := (innerWidth - formWidth) / 2
+	if leftPadding < 0 {
+		leftPadding = 0
+	}
+	padStr := strings.Repeat(" ", leftPadding)
+
+	for _, l := range strings.Split(inputLine, "\n") {
+		lines = append(lines, padStr+l)
+	}
+	lines = append(lines, "")
+
+	for _, l := range strings.Split(apiKeyLine, "\n") {
+		lines = append(lines, padStr+l)
+	}
+	lines = append(lines, "")
+
+	lines = append(lines,
 		centeredLine(button, innerWidth),
 		"",
 		centeredLine(status, innerWidth),
 		"",
-	}
+	)
 
 	card := renderBox(lines, cardWidth, m.connectCardRect.h)
 	body := lipgloss.Place(m.width, m.height-footerHeight, lipgloss.Center, lipgloss.Center, card)
-	footer := renderFooter("⏎ connect  esc/q quit", m.footerRect.w)
+	footer := renderFooter("tab switch  ⏎ connect  esc/q quit", m.footerRect.w)
 
 	return lipgloss.JoinVertical(lipgloss.Left, body, footer)
 }

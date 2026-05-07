@@ -174,3 +174,43 @@ func (m *model) appendActivity(line string) {
 	}
 	m.activities = append(m.activities, line)
 }
+
+func mapIconToTerminal(iconName string) string {
+	iconName = strings.ToLower(iconName)
+	switch {
+	case strings.Contains(iconName, "play") || strings.Contains(iconName, "start"):
+		return "▶"
+	case strings.Contains(iconName, "link") || strings.Contains(iconName, "hook"):
+		return "🔗"
+	case strings.Contains(iconName, "variable") || strings.Contains(iconName, "var"):
+		return "χ"
+	case strings.Contains(iconName, "code") || strings.Contains(iconName, "bracket"):
+		return "</>"
+	case strings.Contains(iconName, "globe") || strings.Contains(iconName, "http") || strings.Contains(iconName, "web"):
+		return "🌐"
+	case strings.Contains(iconName, "arrow") || strings.Contains(iconName, "condition") || strings.Contains(iconName, "switch"):
+		return "⇄"
+	case strings.Contains(iconName, "chat") || strings.Contains(iconName, "log") || strings.Contains(iconName, "message"):
+		return "💬"
+	case strings.Contains(iconName, "check") || strings.Contains(iconName, "circle") || strings.Contains(iconName, "output"):
+		return "✔"
+	case strings.Contains(iconName, "db") || strings.Contains(iconName, "database"):
+		return "🗄"
+	case strings.Contains(iconName, "mail") || strings.Contains(iconName, "email"):
+		return "✉"
+	case strings.Contains(iconName, "file") || strings.Contains(iconName, "document"):
+		return "📄"
+	case strings.Contains(iconName, "key") || strings.Contains(iconName, "lock"):
+		return "🔒"
+	case strings.Contains(iconName, "user") || strings.Contains(iconName, "person"):
+		return "👤"
+	case strings.Contains(iconName, "time") || strings.Contains(iconName, "clock") || strings.Contains(iconName, "wait"):
+		return "⏱"
+	case strings.Contains(iconName, "trash") || strings.Contains(iconName, "delete"):
+		return "🗑"
+	case strings.Contains(iconName, "stop") || strings.Contains(iconName, "end"):
+		return "■"
+	default:
+		return "▪"
+	}
+}

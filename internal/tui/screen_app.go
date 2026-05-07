@@ -12,10 +12,10 @@ func (m model) updateApp(msg tea.Msg) (model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		if m.composerInput.Focused() {
+			if msg.Code == tea.KeyEnter {
+				return m, m.submitCommand()
+			}
 			switch msg.String() {
-			case "enter":
-				m.submitCommand()
-				return m, nil
 			case "esc":
 				m.composerInput.Blur()
 				return m, nil
@@ -38,9 +38,9 @@ func (m model) updateApp(msg tea.Msg) (model, tea.Cmd) {
 		case "n":
 			m.createWorkflow()
 			return m, nil
-		case "enter":
-			m.openSelectedWorkflow()
-			return m, nil
+		}
+		if msg.Code == tea.KeyEnter {
+			return m.openSelectedWorkflow()
 		}
 	case tea.MouseClickMsg:
 		mouse := msg.Mouse()
@@ -61,6 +61,7 @@ func (m model) handleWorkflowsLoaded(msg workflowsLoadedMsg) (tea.Model, tea.Cmd
 	m.loadingWorkflows = false
 	if msg.err != nil {
 		m.workflows = nil
+		m.availableNodes = nil
 		m.selectedWorkflow = 0
 		m.workflowScroll = 0
 		m.workflowsError = msg.err.Error()
@@ -70,6 +71,7 @@ func (m model) handleWorkflowsLoaded(msg workflowsLoadedMsg) (tea.Model, tea.Cmd
 
 	m.workflowsError = ""
 	m.workflows = msg.workflows
+	m.availableNodes = msg.nodes
 	if len(m.workflows) == 0 {
 		m.selectedWorkflow = 0
 		m.workflowScroll = 0
@@ -201,15 +203,21 @@ func (m model) renderCommandBar() string {
 	width := m.commandRect.w
 	innerWidth := max(width-4, 1)
 	inputWidth := max(innerWidth, 8)
-	value := m.composerInput.View()
-	if strings.TrimSpace(m.composerInput.Value()) == "" && !m.composerInput.Focused() {
-		value = lipgloss.NewStyle().Foreground(mutedTextColor).Render("Type a command, search workflow, or ask the agent...")
+	titleLine := lipgloss.NewStyle().Bold(true).Foreground(textColor).Render(title)
+	inputLine := renderInputBlock(m.composerInput.View(), inputWidth, m.composerInput.Focused())
+	lines := strings.Split(inputLine, "\n")
+
+	leftPadding := (width - inputWidth) / 2
+	if leftPadding < 0 {
+		leftPadding = 0
+	}
+	padStr := strings.Repeat(" ", leftPadding)
+
+	for i, l := range lines {
+		lines[i] = padStr + l
 	}
 
-	titleLine := lipgloss.NewStyle().Bold(true).Foreground(textColor).Render(title)
-	inputLine := inputShell(inputWidth, m.composerInput.Focused()).Render(padRightBlank(value, max(inputWidth-2, 1)))
-
-	return renderSectionPanel(titleLine, []string{inputLine}, width, m.commandRect.h)
+	return renderSectionPanel(titleLine, lines, width, m.commandRect.h)
 }
 
 func (m *model) moveWorkflow(delta int) {
@@ -229,24 +237,33 @@ func (m *model) createWorkflow() {
 	m.beginNewWorkflowEditor()
 }
 
-func (m *model) openSelectedWorkflow() {
+func (m *model) openSelectedWorkflow() (model, tea.Cmd) {
 	if m.selectedWorkflow == len(m.workflows) {
 		m.createWorkflow()
-		return
+		return *m, nil
 	}
 
 	wf, ok := m.selectedWorkflowItem()
 	if !ok {
-		return
+		return *m, nil
 	}
-	m.beginWorkflowEditor(wf.name)
-	m.appendActivity("Opened workflow: " + wf.name)
+
+	if strings.TrimSpace(m.activeHost) == "" {
+		m.beginWorkflowEditor(wf.name)
+		m.appendActivity("Opened workflow without server details: " + wf.name)
+		return *m, nil
+	}
+
+	m.loadingWorkflows = true
+	m.workflowsError = ""
+	m.appendActivity("Loading workflow: " + wf.name)
+	return *m, tea.Batch(m.spinner.Tick, loadWorkflowCmd(m.activeHost, m.activeAPIKey, wf.id))
 }
 
-func (m *model) submitCommand() {
+func (m *model) submitCommand() tea.Cmd {
 	value := strings.TrimSpace(m.composerInput.Value())
 	if value == "" {
-		return
+		return nil
 	}
 
 	switch strings.ToLower(value) {
@@ -262,11 +279,12 @@ func (m *model) submitCommand() {
 	case "create workflow":
 		m.composerInput.SetValue("")
 		m.beginNewWorkflowEditor()
-		return
+		return nil
 	case "open selected workflow":
 		m.composerInput.SetValue("")
-		m.openSelectedWorkflow()
-		return
+		next, cmd := m.openSelectedWorkflow()
+		*m = next
+		return cmd
 	default:
 		m.commandOutput = []string{
 			"Unknown command: " + value,
@@ -276,6 +294,35 @@ func (m *model) submitCommand() {
 
 	m.appendActivity("Command submitted: " + value)
 	m.composerInput.SetValue("")
+	return nil
+}
+
+func (m model) handleWorkflowLoaded(msg workflowLoadedMsg) (tea.Model, tea.Cmd) {
+	m.loadingWorkflows = false
+	if msg.err != nil {
+		m.workflowsError = msg.err.Error()
+		m.appendActivity("Failed to open workflow: " + truncatePlain(msg.err.Error(), 56))
+		return m, nil
+	}
+
+	m.beginWorkflowEditorFromAPI(msg.flow)
+	m.appendActivity("Opened workflow: " + fallbackString(msg.flow.Name, fmt.Sprintf("Flow %d", msg.flow.ID)))
+	return m, nil
+}
+
+func (m model) handleWorkflowSaved(msg workflowSavedMsg) (tea.Model, tea.Cmd) {
+	m.editorSaving = false
+	if msg.err != nil {
+		m.editorStatusMessage = "Save failed: " + truncatePlain(msg.err.Error(), 40)
+		m.appendActivity("Failed to save workflow: " + truncatePlain(msg.err.Error(), 56))
+		return m, nil
+	}
+
+	m.editorWorkflowID = msg.flow.ID
+	m.editorWorkflowName = fallbackString(msg.flow.Name, m.editorWorkflowName)
+	m.clearEditorDirty("All changes saved")
+	m.appendActivity("Saved workflow: " + m.editorWorkflowName)
+	return m, nil
 }
 
 func (m model) selectedWorkflowItem() (workflow, bool) {

@@ -33,6 +33,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleConnectionResult(msg)
 	case workflowsLoadedMsg:
 		return m.handleWorkflowsLoaded(msg)
+	case workflowLoadedMsg:
+		return m.handleWorkflowLoaded(msg)
+	case workflowSavedMsg:
+		return m.handleWorkflowSaved(msg)
 	}
 
 	var cmds []tea.Cmd
