@@ -346,29 +346,76 @@ func (m model) renderWorkflowEditor() string {
 }
 
 func (m model) renderWorkflowTopBar() string {
-	title := lipgloss.NewStyle().Bold(true).Foreground(textColor).Render("FusionFlow")
-	name := lipgloss.NewStyle().Bold(true).Foreground(textColor).Render(m.editorWorkflowName)
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(textColor).
+		Render("FusionFlow")
+
+	name := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(textColor).
+		Render(m.editorWorkflowName)
+
 	saveLabel := "Save"
-	saveStyle := lipgloss.NewStyle().Foreground(successColor).Bold(true)
+	saveStyle := lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(mutedTextColor).
+		Padding(0, 1).
+		Bold(true)
+
 	if m.editorSaving {
 		saveLabel = "Saving..."
-		saveStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
+		saveStyle = lipgloss.NewStyle().
+			Foreground(accentColor).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(accentColor).
+			Background(successColor).Bold(true)
+
 	} else if m.editorDirty {
-		saveStyle = lipgloss.NewStyle().Foreground(successColor).Bold(true)
+		saveStyle = lipgloss.NewStyle().
+			Foreground(textColor).
+			Background(focusedBorderColor).
+			BorderStyle(lipgloss.RoundedBorder()).
+			// BorderForeground(focusedBorderColor).
+			BorderBackground(focusedBorderColor).
+			Padding(0, 1).
+			Bold(true)
 	} else {
-		saveStyle = lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true)
+		saveStyle = lipgloss.NewStyle().
+			Foreground(textColor).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(focusedBorderColor).
+			Padding(0, 1).
+			Bold(true)
 	}
-	save := saveStyle.Render("Save")
-	if m.editorSaving {
-		save = saveStyle.Render(saveLabel)
-	}
+	save := saveStyle.Render(saveLabel)
 
 	left := "  " + title + "  │  " + name
-	right := save + "  "
-	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 1)
-	line := left + blank(gap) + right
-	divider := lipgloss.NewStyle().Foreground(panelBorder).Render(strings.Repeat("─", max(m.width, 1)))
-	return line + "\n" + divider + "\n" + blank(m.width)
+	leftBlock := strings.Join([]string{
+		left,
+		"",
+		"",
+	}, "\n")
+
+	rightWidth := lipgloss.Width(save) + 2
+	leftWidth := max(m.width-rightWidth, 1)
+
+	leftBlock = lipgloss.NewStyle().
+		Width(leftWidth).
+		Render(leftBlock)
+
+	header := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		leftBlock,
+		save+" ",
+	)
+
+	divider := lipgloss.NewStyle().
+		Foreground(panelBorder).
+		Render(strings.Repeat(" ", max(m.width, 1)))
+
+	return header + "\n" + divider
 }
 
 func (m model) workflowFooterText() string {

@@ -9,16 +9,17 @@ import (
 )
 
 var (
-	backgroundColor = lipgloss.Color("#222222")
-	inputBackground = lipgloss.Color("#333333")
-	panelBorder     = lipgloss.Color("#4B5563")
-	shadowColor     = lipgloss.Color("#222222")
-	shadowEdgeColor = lipgloss.Color("#222222")
-	textColor       = lipgloss.Color("#F3F4F6")
-	mutedTextColor  = lipgloss.Color("#9CA3AF")
-	accentColor     = lipgloss.Color("#60A5FA")
-	successColor    = lipgloss.Color("#34D399")
-	errorColor      = lipgloss.Color("#F87171")
+	backgroundColor    = lipgloss.Color("#222222")
+	inputBackground    = lipgloss.Color("#333333")
+	panelBorder        = lipgloss.Color("#615fff")
+	shadowColor        = lipgloss.Color("#222222")
+	focusedBorderColor = lipgloss.Color("#615fff")
+	shadowEdgeColor    = lipgloss.Color("#222222")
+	textColor          = lipgloss.Color("#F3F4F6")
+	mutedTextColor     = lipgloss.Color("#9CA3AF")
+	accentColor        = lipgloss.Color("#60A5FA")
+	successColor       = lipgloss.Color("#34D399")
+	errorColor         = lipgloss.Color("#F87171")
 )
 
 func textInputStyles() textinput.Styles {
@@ -34,7 +35,7 @@ func textInputStyles() textinput.Styles {
 	styles.Focused.Prompt = base
 	styles.Focused.Placeholder = muted
 	styles.Focused.Suggestion = muted
-	
+
 	blurredBase := lipgloss.NewStyle().
 		Foreground(mutedTextColor).
 		Background(inputBackground)
