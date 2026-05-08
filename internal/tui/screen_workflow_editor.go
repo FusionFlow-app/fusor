@@ -337,14 +337,20 @@ func (m model) renderWorkflowEditor() string {
 
 	topbar := m.renderWorkflowTopBar()
 	palette := renderSectionPanel("NODES", m.renderPaletteLines(), m.paletteRect.w, m.paletteRect.h)
-	canvas := renderSectionPanel(m.editorWorkflowName, m.renderCanvasLines(), m.canvasRect.w, m.canvasRect.h)
-	// chat := m.renderAIChatPanel()
+	canvasWidth := max(m.width-m.paletteRect.w-sectionGapSize, 20)
+
+	canvas := renderSectionPanel(
+		m.editorWorkflowName,
+		m.renderCanvasLines(),
+		canvasWidth,
+		m.canvasRect.h,
+	) // chat := m.renderAIChatPanel()
 	body := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		palette,
 		blank(sectionGapSize),
 		canvas,
-		blank(sectionGapSize),
+		// blank(sectionGapSize),
 		// chat
 	)
 	footer := renderFooter(m.workflowFooterText(), m.footerRect.w)
