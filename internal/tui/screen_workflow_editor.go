@@ -338,86 +338,45 @@ func (m model) renderWorkflowEditor() string {
 	topbar := m.renderWorkflowTopBar()
 	palette := renderSectionPanel("NODES", m.renderPaletteLines(), m.paletteRect.w, m.paletteRect.h)
 	canvas := renderSectionPanel(m.editorWorkflowName, m.renderCanvasLines(), m.canvasRect.w, m.canvasRect.h)
-	chat := m.renderAIChatPanel()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, palette, blank(sectionGapSize), canvas, blank(sectionGapSize), chat)
+	// chat := m.renderAIChatPanel()
+	body := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		palette,
+		blank(sectionGapSize),
+		canvas,
+		blank(sectionGapSize),
+		// chat
+	)
 	footer := renderFooter(m.workflowFooterText(), m.footerRect.w)
 	ui := lipgloss.JoinVertical(lipgloss.Left, topbar, body, footer)
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, ui)
 }
 
 func (m model) renderWorkflowTopBar() string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(textColor).
-		Render("FusionFlow")
-
-	name := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(textColor).
-		Render(m.editorWorkflowName)
-
+	title := lipgloss.NewStyle().Bold(true).Foreground(textColor).Render("FusionFlow")
+	name := lipgloss.NewStyle().Bold(true).Foreground(textColor).Render(m.editorWorkflowName)
 	saveLabel := "Save"
-	saveStyle := lipgloss.NewStyle().
-		Foreground(mutedTextColor).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(mutedTextColor).
-		Padding(0, 1).
-		Bold(true)
-
+	saveStyle := lipgloss.NewStyle().Foreground(successColor).Bold(true)
 	if m.editorSaving {
 		saveLabel = "Saving..."
-		saveStyle = lipgloss.NewStyle().
-			Foreground(accentColor).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(accentColor).
-			Background(successColor).Bold(true)
-
+		saveStyle = lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	} else if m.editorDirty {
-		saveStyle = lipgloss.NewStyle().
-			Foreground(textColor).
-			Background(focusedBorderColor).
-			BorderStyle(lipgloss.RoundedBorder()).
-			// BorderForeground(focusedBorderColor).
-			BorderBackground(focusedBorderColor).
-			Padding(0, 1).
-			Bold(true)
+		saveStyle = lipgloss.NewStyle().Foreground(successColor).Bold(true)
 	} else {
-		saveStyle = lipgloss.NewStyle().
-			Foreground(textColor).
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(focusedBorderColor).
-			Padding(0, 1).
-			Bold(true)
+		saveStyle = lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true)
 	}
-	save := saveStyle.Render(saveLabel)
+	save := saveStyle.Render("Save")
+	if m.editorSaving {
+		save = saveStyle.Render(saveLabel)
+	}
 
 	left := "  " + title + "  │  " + name
-	leftBlock := strings.Join([]string{
-		left,
-		"",
-		"",
-	}, "\n")
-
-	rightWidth := lipgloss.Width(save) + 2
-	leftWidth := max(m.width-rightWidth, 1)
-
-	leftBlock = lipgloss.NewStyle().
-		Width(leftWidth).
-		Render(leftBlock)
-
-	header := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		leftBlock,
-		save+" ",
-	)
-
-	divider := lipgloss.NewStyle().
-		Foreground(panelBorder).
-		Render(strings.Repeat(" ", max(m.width, 1)))
-
-	return header + "\n" + divider
+	right := save + "  "
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	line := left + blank(gap) + right
+	divider := lipgloss.NewStyle().Foreground(panelBorder).Render(strings.Repeat("─", max(m.width, 1)))
+	return line + "\n" + divider + "\n" + blank(m.width)
 }
-
 func (m model) workflowFooterText() string {
 	base := "drag nodes  right-click menu  ctrl+shift+p palette  ctrl+s save  chat: click/type/scroll  esc back"
 	if strings.TrimSpace(m.editorStatusMessage) == "" {
