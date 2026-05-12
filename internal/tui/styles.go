@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var (
@@ -73,15 +74,24 @@ func renderFooter(text string, width int) string {
 	return padRightBlank(style.Render(truncatePlain(text, max(width, 1))), max(width, 1))
 }
 
-func buttonStyle(disabled bool) lipgloss.Style {
-	style := lipgloss.NewStyle().
-		Foreground(textColor).
-		Background(panelBorder).
-		Align(lipgloss.Center)
-	if disabled {
-		style = style.Background(panelBorder).Foreground(mutedTextColor)
+func renderButton(label string, width int, focused bool) string {
+	if width <= 0 {
+		return ""
 	}
-	return style
+
+	label = truncatePlain(ansi.Strip(label), width)
+	style := lipgloss.NewStyle().
+		Foreground(focusedBorderColor).
+		Underline(true).
+		Width(width).
+		Align(lipgloss.Center)
+	if focused {
+		style = style.
+			Foreground(textColor).
+			Background(focusedBorderColor)
+	}
+
+	return style.Render(label)
 }
 
 func renderStatusValue(value string) string {
@@ -142,12 +152,13 @@ func renderShadowRow(width, height int) string {
 }
 
 func renderInputBlock(val string, width int, focused bool) string {
-	borderColor := panelBorder
+	borderColor := mutedTextColor
 	if focused {
-		borderColor = accentColor
+		borderColor = focusedBorderColor
 	}
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	bgStyle := lipgloss.NewStyle().Background(inputBackground)
+
+	bgStyle := lipgloss.NewStyle()
 
 	b := lipgloss.RoundedBorder()
 	innerWidth := width - 2
@@ -164,7 +175,12 @@ func renderInputBlock(val string, width int, focused bool) string {
 		availWidth = 0
 	}
 
-	paddedVal := lipgloss.NewStyle().Background(inputBackground).Width(availWidth).Render(val)
+	paddedVal := lipgloss.NewStyle().
+		Background(inputBackground).
+		Inline(true).
+		MaxWidth(availWidth).
+		Width(availWidth).
+		Render(val)
 
 	midLeft := borderStyle.Render(b.Left) + leftPad
 	midRight := borderStyle.Render(b.Right)

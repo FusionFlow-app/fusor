@@ -337,21 +337,17 @@ func (m model) renderWorkflowEditor() string {
 
 	topbar := m.renderWorkflowTopBar()
 	palette := renderSectionPanel("NODES", m.renderPaletteLines(), m.paletteRect.w, m.paletteRect.h)
-	canvasWidth := max(m.width-m.paletteRect.w-sectionGapSize, 20)
-
 	canvas := renderSectionPanel(
 		m.editorWorkflowName,
 		m.renderCanvasLines(),
-		canvasWidth,
+		m.canvasRect.w,
 		m.canvasRect.h,
-	) // chat := m.renderAIChatPanel()
+	)
 	body := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		palette,
 		blank(sectionGapSize),
 		canvas,
-		// blank(sectionGapSize),
-		// chat
 	)
 	footer := renderFooter(m.workflowFooterText(), m.footerRect.w)
 	ui := lipgloss.JoinVertical(lipgloss.Left, topbar, body, footer)
@@ -384,7 +380,7 @@ func (m model) renderWorkflowTopBar() string {
 	return line + "\n" + divider + "\n" + blank(m.width)
 }
 func (m model) workflowFooterText() string {
-	base := "drag nodes  right-click menu  ctrl+shift+p palette  ctrl+s save  chat: click/type/scroll  esc back"
+	base := "drag nodes  right-click menu  ctrl+shift+p palette  ctrl+s save  esc back"
 	if strings.TrimSpace(m.editorStatusMessage) == "" {
 		return base
 	}
@@ -403,7 +399,7 @@ func (m model) workflowSaveButtonRect() rect {
 func (m model) renderCanvasLines() []string {
 	w := max(m.canvasRect.w-4, 1)
 	h := max(m.canvasRect.h-3, 1)
-	grid := newRuneGrid(w, h)
+	grid := newCanvasGrid(w, h)
 
 	for _, conn := range m.editorConnections {
 		m.drawConnection(grid, conn)
@@ -417,7 +413,15 @@ func (m model) renderCanvasLines() []string {
 
 	lines := make([]string, len(grid))
 	for y := range grid {
-		lines[y] = string(grid[y])
+		var b strings.Builder
+		for _, cell := range grid[y] {
+			value := string(cell.ch)
+			if cell.style != nil {
+				value = cell.style.Render(value)
+			}
+			b.WriteString(value)
+		}
+		lines[y] = b.String()
 	}
 	return lines
 }
@@ -1188,33 +1192,44 @@ func (m *model) rebuildNodeRects() {
 	}
 }
 
-func newRuneGrid(w, h int) [][]rune {
-	grid := make([][]rune, h)
+type canvasCell struct {
+	ch    rune
+	style *lipgloss.Style
+}
+
+func newCanvasGrid(w, h int) [][]canvasCell {
+	grid := make([][]canvasCell, h)
 	for y := range grid {
-		grid[y] = make([]rune, w)
+		grid[y] = make([]canvasCell, w)
 		for x := range grid[y] {
-			grid[y][x] = ' '
+			grid[y][x] = canvasCell{ch: ' '}
 		}
 	}
 	return grid
 }
 
-func drawEditorNode(grid [][]rune, node editorNode, selected bool) {
+func drawEditorNode(grid [][]canvasCell, node editorNode, selected bool) {
 	if node.w < 4 || node.h < 3 {
 		return
 	}
+	var borderStyle *lipgloss.Style
+	if selected {
+		style := lipgloss.NewStyle().Foreground(focusedBorderColor)
+		borderStyle = &style
+	}
+
 	leftTop, rightTop, leftBottom, rightBottom := '╭', '╮', '╰', '╯'
-	drawRune(grid, node.x, node.y, leftTop)
-	drawRune(grid, node.x+node.w-1, node.y, rightTop)
-	drawRune(grid, node.x, node.y+node.h-1, leftBottom)
-	drawRune(grid, node.x+node.w-1, node.y+node.h-1, rightBottom)
+	drawStyledRune(grid, node.x, node.y, leftTop, borderStyle)
+	drawStyledRune(grid, node.x+node.w-1, node.y, rightTop, borderStyle)
+	drawStyledRune(grid, node.x, node.y+node.h-1, leftBottom, borderStyle)
+	drawStyledRune(grid, node.x+node.w-1, node.y+node.h-1, rightBottom, borderStyle)
 	for x := node.x + 1; x < node.x+node.w-1; x++ {
-		drawRune(grid, x, node.y, '─')
-		drawRune(grid, x, node.y+node.h-1, '─')
+		drawStyledRune(grid, x, node.y, '─', borderStyle)
+		drawStyledRune(grid, x, node.y+node.h-1, '─', borderStyle)
 	}
 	for y := node.y + 1; y < node.y+node.h-1; y++ {
-		drawRune(grid, node.x, y, '│')
-		drawRune(grid, node.x+node.w-1, y, '│')
+		drawStyledRune(grid, node.x, y, '│', borderStyle)
+		drawStyledRune(grid, node.x+node.w-1, y, '│', borderStyle)
 	}
 	label := node.label
 	if selected {
@@ -1227,7 +1242,7 @@ func editorNodeWidth(label string) int {
 	return clamp(len([]rune(label))+6, 14, 24)
 }
 
-func (m model) drawContextMenu(grid [][]rune) {
+func (m model) drawContextMenu(grid [][]canvasCell) {
 	items := m.editorMenuItems()
 	if len(items) == 0 {
 		return
@@ -1260,7 +1275,7 @@ func (m model) drawContextMenu(grid [][]rune) {
 	}
 }
 
-func (m model) drawConnection(grid [][]rune, conn editorConnection) {
+func (m model) drawConnection(grid [][]canvasCell, conn editorConnection) {
 	source, okSource := m.editorNodeByID(conn.source)
 	target, okTarget := m.editorNodeByID(conn.target)
 	if !okSource || !okTarget {
@@ -1271,6 +1286,11 @@ func (m model) drawConnection(grid [][]rune, conn editorConnection) {
 	x2 := target.x - 1
 	y2 := target.y + target.h/2
 	arrow := '▶'
+	if y1 == y2 && x1 <= x2 {
+		drawHorizontalLine(grid, x1, x2, y1)
+		drawRune(grid, x2, y2, arrow)
+		return
+	}
 	if x1 > x2 {
 		x1 = source.x + source.w/2
 		y1 = source.y + source.h
@@ -1283,11 +1303,6 @@ func (m model) drawConnection(grid [][]rune, conn editorConnection) {
 			arrow = '▲'
 		}
 	}
-	if y1 == y2 {
-		drawHorizontalLine(grid, x1, x2, y1)
-		drawRune(grid, x2, y2, arrow)
-		return
-	}
 	midX := (x1 + x2) / 2
 	drawHorizontalLine(grid, x1, midX, y1)
 	drawVerticalLine(grid, midX, y1, y2)
@@ -1297,13 +1312,13 @@ func (m model) drawConnection(grid [][]rune, conn editorConnection) {
 	drawRune(grid, x2, y2, arrow)
 }
 
-func drawHorizontalLine(grid [][]rune, x1, x2, y int) {
+func drawHorizontalLine(grid [][]canvasCell, x1, x2, y int) {
 	for x := min(x1, x2); x <= max(x1, x2); x++ {
 		drawRune(grid, x, y, '─')
 	}
 }
 
-func drawVerticalLine(grid [][]rune, x, y1, y2 int) {
+func drawVerticalLine(grid [][]canvasCell, x, y1, y2 int) {
 	for y := min(y1, y2); y <= max(y1, y2); y++ {
 		drawRune(grid, x, y, '│')
 	}
@@ -1345,14 +1360,18 @@ func (m model) editorNodeByID(id string) (editorNode, bool) {
 	return editorNode{}, false
 }
 
-func drawRune(grid [][]rune, x, y int, r rune) {
+func drawRune(grid [][]canvasCell, x, y int, r rune) {
+	drawStyledRune(grid, x, y, r, nil)
+}
+
+func drawStyledRune(grid [][]canvasCell, x, y int, r rune, style *lipgloss.Style) {
 	if y < 0 || y >= len(grid) || x < 0 || len(grid) == 0 || x >= len(grid[y]) {
 		return
 	}
-	grid[y][x] = r
+	grid[y][x] = canvasCell{ch: r, style: style}
 }
 
-func drawText(grid [][]rune, x, y int, text string) {
+func drawText(grid [][]canvasCell, x, y int, text string) {
 	for i, r := range []rune(text) {
 		drawRune(grid, x+i, y, r)
 	}

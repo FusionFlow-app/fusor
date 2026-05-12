@@ -138,10 +138,11 @@ type model struct {
 	width  int
 	height int
 
-	connecting       bool
-	connected        bool
-	loadingWorkflows bool
-	terminalFocused  bool
+	connecting           bool
+	connected            bool
+	connectButtonFocused bool
+	loadingWorkflows     bool
+	terminalFocused      bool
 
 	activeHost     string
 	activeAPIKey   string

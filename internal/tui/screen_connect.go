@@ -16,14 +16,7 @@ func (m model) updateConnect(msg tea.Msg) (model, tea.Cmd) {
 			return m.startConnection()
 		}
 		if msg.String() == "tab" || msg.String() == "shift+tab" || msg.String() == "up" || msg.String() == "down" {
-			if m.hostInput.Focused() {
-				m.hostInput.Blur()
-				m.apiKeyInput.Focus()
-			} else {
-				m.apiKeyInput.Blur()
-				m.hostInput.Focus()
-			}
-			return m, nil
+			return m.focusNextConnectControl(msg.String() == "shift+tab" || msg.String() == "up"), nil
 		}
 	case tea.MouseClickMsg:
 		mouse := msg.Mouse()
@@ -94,6 +87,8 @@ func (m model) handleConnectionResult(msg connectionResultMsg) (tea.Model, tea.C
 func (m model) handleConnectClick(x, y int) (model, tea.Cmd) {
 	switch {
 	case inside(x, y, m.connectInputRect):
+		m.connectButtonFocused = false
+		m.apiKeyInput.Blur()
 		cmd := m.hostInput.Focus()
 		return m, cmd
 	case inside(x, y, m.connectButtonRect):
@@ -104,6 +99,37 @@ func (m model) handleConnectClick(x, y int) (model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+func (m model) focusNextConnectControl(reverse bool) model {
+	focusIndex := 0
+	switch {
+	case m.apiKeyInput.Focused():
+		focusIndex = 1
+	case m.connectButtonFocused:
+		focusIndex = 2
+	}
+
+	if reverse {
+		focusIndex = (focusIndex + 2) % 3
+	} else {
+		focusIndex = (focusIndex + 1) % 3
+	}
+
+	m.hostInput.Blur()
+	m.apiKeyInput.Blur()
+	m.connectButtonFocused = false
+
+	switch focusIndex {
+	case 0:
+		m.hostInput.Focus()
+	case 1:
+		m.apiKeyInput.Focus()
+	case 2:
+		m.connectButtonFocused = true
+	}
+
+	return m
 }
 
 func (m model) renderConnectScreen() string {
@@ -125,16 +151,17 @@ func (m model) renderConnectScreen() string {
 
 	buttonLabel := "Connect"
 	if m.connecting {
-		buttonLabel = m.spinner.View() + " Connecting"
+		buttonLabel = m.spinner.View() + " Connect"
 	}
-	button := buttonStyle(m.connecting).Width(connectButtonWidth).Render(buttonLabel)
+	button := renderButton(buttonLabel, connectButtonWidth, m.connectButtonFocused)
 
 	statusText := m.connectStatus
 	statusStyle := lipgloss.NewStyle().Foreground(mutedTextColor)
 	switch {
 	case m.connecting:
 		statusText = "Connecting..."
-		statusStyle = statusStyle.Foreground(accentColor)
+		statusStyle = statusStyle.
+			Foreground(accentColor)
 	case m.connectError != "":
 		statusStyle = statusStyle.Foreground(errorColor)
 	case m.connected:
@@ -167,8 +194,10 @@ func (m model) renderConnectScreen() string {
 	}
 	lines = append(lines, "")
 
+	for _, l := range strings.Split(button, "\n") {
+		lines = append(lines, centeredLine(l, innerWidth))
+	}
 	lines = append(lines,
-		centeredLine(button, innerWidth),
 		"",
 		centeredLine(status, innerWidth),
 		"",

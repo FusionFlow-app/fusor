@@ -42,7 +42,7 @@ func (m *model) reflow() {
 	}
 	m.connectButtonRect = rect{
 		x: m.connectCardRect.x + max((m.connectCardRect.w-connectButtonWidth)/2, 0),
-		y: m.connectCardRect.y + 7,
+		y: m.connectCardRect.y + 14,
 		w: min(connectButtonWidth, max(m.connectCardRect.w-4, 1)),
 		h: 1,
 	}
@@ -61,34 +61,14 @@ func (m *model) reflow() {
 	editorBodyY := editorTopBarHeight
 	editorBodyHeight := max(m.height-footerHeight-editorTopBarHeight, 1)
 	editorSidebarWidth := clamp(max(m.width/5, 22), 20, 30)
-	aiChatWidth := clamp(max(m.width/4, 30), 28, 44)
-	canvasWidth := max(m.width-editorSidebarWidth-aiChatWidth-sectionGapSize*2, 1)
-	if canvasWidth < 30 && m.width > 64 {
-		aiChatWidth = max(24, m.width-editorSidebarWidth-30-sectionGapSize*2)
-		canvasWidth = max(m.width-editorSidebarWidth-aiChatWidth-sectionGapSize*2, 1)
-	}
+	canvasWidth := max(m.width-editorSidebarWidth-sectionGapSize, 1)
 
 	m.paletteRect = rect{x: 0, y: editorBodyY, w: editorSidebarWidth, h: editorBodyHeight}
 	m.canvasRect = rect{x: editorSidebarWidth + sectionGapSize, y: editorBodyY, w: canvasWidth, h: editorBodyHeight}
 	m.inspectorRect = rect{x: 0, y: 0, w: 0, h: 0}
-	m.aiChatRect = rect{
-		x: m.canvasRect.x + m.canvasRect.w + sectionGapSize,
-		y: editorBodyY,
-		w: aiChatWidth,
-		h: editorBodyHeight,
-	}
-	m.aiChatMessagesRect = rect{
-		x: m.aiChatRect.x + 2,
-		y: m.aiChatRect.y + 2,
-		w: max(m.aiChatRect.w-4, 1),
-		h: max(m.aiChatRect.h-5, 1),
-	}
-	m.aiPromptInputRect = rect{
-		x: m.aiChatRect.x + 2,
-		y: m.aiChatRect.y + max(m.aiChatRect.h-2, 0),
-		w: max(m.aiChatRect.w-4, 1),
-		h: 1,
-	}
+	m.aiChatRect = rect{}
+	m.aiChatMessagesRect = rect{}
+	m.aiPromptInputRect = rect{}
 	m.modalRect = rect{
 		x: max((m.width-44)/2, 0),
 		y: max((m.height-18)/2, 0),
